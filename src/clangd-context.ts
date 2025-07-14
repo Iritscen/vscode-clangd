@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as vscodelc from 'vscode-languageclient/node';
+import * as vscodelcAsync from 'vscode-languageclient/lib/common/utils/async';
 
 import * as ast from './ast';
 import * as config from './config';
@@ -196,6 +197,72 @@ export class ClangdContext implements vscode.Disposable {
             return symbol;
           })
         },
+        handleDiagnostics: (uri, diagnostics, next) =>
+        {
+          console.log("Got diagnostics.");
+          // Delay the displaying of diagnostics if:
+          // 1. They are non-empty AND
+          // 2. The user asked for diagnostics to be delayed after typing or until the user moves to another line
+          // Rule #1 means that regardless of user settings we will always update diagnostics immediately if the document's new diagnostics
+          // state is a clean bill of health (no errors, no warnings) rather than leaving stale diagnostics on-screen
+          if (diagnostics.length > 0 && (this.userDiagnosticsDelayAfterEdit > 0.0 || (this.diagnosticsWaitForLineChange && !this.noDelayOnNextDiag)))
+            this.diagnosticsCache.set(uri.toString(), diagnostics); // save diagnostics for later
+          else
+          {
+            console.log(`Letting diagnostics through. userDiagnosticsDelayAfterEdit is ${this.userDiagnosticsDelayAfterEdit}, diagnosticsWaitForLineChange is ${this.diagnosticsWaitForLineChange}, and noDelayOnNextDiag is ${this.noDelayOnNextDiag}.`);
+            this.diagnosticsCache.clear(); // prevent outdated cache from appearing after this
+            if (diagnostics.length == 0)
+              console.log("Diagnostics were empty.");
+            // Let diagnostics pass through to client, but we have to do this through our custom diagnostics collection, not by calling
+            // "next(uri, diagnostics)", because the custom collection overrides the built-in diagnostics
+            this.diagnosticsHandle.set(uri, diagnostics);
+          }
+
+          console.log("Reset noDelayOnNextDiag from handleDiagnostics().");
+          this.noDelayOnNextDiag = false;
+        },
+        didChange: async (event, next) =>
+        {
+          // If diagnosticsWaitForLineChange is turned on, then if the user types something, waits long enough for diagnostics to return (knowingly or not),
+          // then changes lines and types something, diagnostics will display immediately for the current line, so we reset noDelayOnNextDiag here as a safeguard
+          console.log("Reset noDelayOnNextDiag from didChange().");
+          this.noDelayOnNextDiag = false;
+
+          console.log("Got changes.");
+          if (this.userDiagnosticsDelayAfterEdit > 0.0 || this.diagnosticsWaitForLineChange)
+          {
+            // The user did something, so reset timer for when to reveal diagnostics
+            this.postEditDelayer.cancel();
+
+            if (this.userDiagnosticsDelayAfterEdit > 0.0)
+            {
+              console.log("Resetting timer after changes.");
+              this.postEditDelayer.trigger(() => { this.revealDiagnostics(); }); // restart timer
+            }
+            else // this.diagnosticsWaitForLineChange
+            {
+              if (this.curLineCount == 0) // this probably means we just opened the project, so simply save our current line count
+                this.curLineCount = event.document.lineCount;
+              else
+              {
+                for (const change of event.contentChanges)
+                {
+                  if (event.document.lineCount != this.curLineCount) // at least one line of content was added or removed, which counts as a line change
+                  {
+                    console.log("Found new line count in changes.");
+                    this.diagnosticsCache.clear(); // prevent outdated diags from appearing after this edit; instead we'll show the next diags as soon as they arrive
+                    this.noDelayOnNextDiag = true;
+                    this.curLineCount = event.document.lineCount;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          // Allow document change to be processed
+          next(event);
+        }
       },
     };
 
@@ -217,7 +284,7 @@ export class ClangdContext implements vscode.Disposable {
     console.log('Clang Language Server is now active!');
     fileStatus.activate(this);
     switchSourceHeader.activate(this);
-  }
+  } // end constructor
 
   get visibleClangdEditors(): vscode.TextEditor[] {
     return vscode.window.visibleTextEditors.filter(
@@ -233,5 +300,54 @@ export class ClangdContext implements vscode.Disposable {
     if (this.client)
       this.client.stop();
     this.subscriptions = []
+  }
+
+  diagnosticsHandle = vscode.languages.createDiagnosticCollection("Delayed diagnostics");
+  diagnosticsCache: Map<string, vscode.Diagnostic[]> = new Map();
+  defaultDiagnosticsDelayAfterEdit = 0.75;
+  userDiagnosticsDelayAfterEdit = config.get<number>('diagnosticsDelay.afterTyping') ?? this.defaultDiagnosticsDelayAfterEdit;
+  postEditDelayer = new vscodelcAsync.Delayer<void>(this.userDiagnosticsDelayAfterEdit * 1000);
+  lastLineCursor = 0;
+  diagnosticsWaitForLineChange = config.get<boolean>('diagnosticsDelay.untilLineChange') ?? false;
+  noDelayOnNextDiag = false;
+  curLineCount = 0;
+
+  // Send to VSC the last diagnostics received from clangd
+  revealDiagnostics()
+  {
+    console.log("Showing saved diagnostics.");
+    for (const [key, diagnostics] of this.diagnosticsCache)
+    {
+        const uri = vscode.Uri.parse(key);
+        this.diagnosticsHandle.set(uri, diagnostics);
+    }
+
+    this.diagnosticsCache.clear();
+    this.noDelayOnNextDiag = false;
+  }
+
+  // React to a change in the position of the text cursor
+  cursorMoved(newLine : number)
+  {
+    console.log("Text cursor moved.");
+    // If lastLineCursor is 0, this probably means we just opened the project, so don't take action this first time that the line is set
+    if (this.diagnosticsWaitForLineChange && newLine !== this.lastLineCursor && this.lastLineCursor != 0)
+    {
+      console.log("Showing diags due to cursor line change.");
+      // Show existing diagnostics, but also set noDelayOnNextDiag to true because if the user just pasted something in,
+      // it's the next diags which will contain the response to the pasted text
+      this.revealDiagnostics();
+      this.noDelayOnNextDiag = true;
+    }
+
+    this.lastLineCursor = newLine;
+  }
+
+  // React to user changing the diagnostics delay
+  updateDelay()
+  {
+    this.userDiagnosticsDelayAfterEdit = config.get<number>('diagnosticsDelay.afterTyping') ?? this.defaultDiagnosticsDelayAfterEdit;
+    console.log(`Delay updated to ${this.userDiagnosticsDelayAfterEdit}.`);
+    this.postEditDelayer = new vscodelcAsync.Delayer<void>(this.userDiagnosticsDelayAfterEdit * 1000);
   }
 }
