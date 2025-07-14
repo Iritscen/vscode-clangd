@@ -199,7 +199,6 @@ export class ClangdContext implements vscode.Disposable {
         },
         handleDiagnostics: (uri, diagnostics, next) =>
         {
-          console.log("Got diagnostics.");
           // Delay the displaying of diagnostics if:
           // 1. They are non-empty AND
           // 2. The user asked for diagnostics to be delayed after typing or until the user moves to another line
@@ -209,26 +208,21 @@ export class ClangdContext implements vscode.Disposable {
             this.diagnosticsCache.set(uri.toString(), diagnostics); // save diagnostics for later
           else
           {
-            console.log(`Letting diagnostics through. userDiagnosticsDelayAfterEdit is ${this.userDiagnosticsDelayAfterEdit}, diagnosticsWaitForLineChange is ${this.diagnosticsWaitForLineChange}, and noDelayOnNextDiag is ${this.noDelayOnNextDiag}.`);
             this.diagnosticsCache.clear(); // prevent outdated cache from appearing after this
-            if (diagnostics.length == 0)
-              console.log("Diagnostics were empty.");
+
             // Let diagnostics pass through to client, but we have to do this through our custom diagnostics collection, not by calling
             // "next(uri, diagnostics)", because the custom collection overrides the built-in diagnostics
             this.diagnosticsHandle.set(uri, diagnostics);
           }
 
-          console.log("Reset noDelayOnNextDiag from handleDiagnostics().");
           this.noDelayOnNextDiag = false;
         },
         didChange: async (event, next) =>
         {
           // If diagnosticsWaitForLineChange is turned on, then if the user types something, waits long enough for diagnostics to return (knowingly or not),
           // then changes lines and types something, diagnostics will display immediately for the current line, so we reset noDelayOnNextDiag here as a safeguard
-          console.log("Reset noDelayOnNextDiag from didChange().");
           this.noDelayOnNextDiag = false;
 
-          console.log("Got changes.");
           if (this.userDiagnosticsDelayAfterEdit > 0.0 || this.diagnosticsWaitForLineChange)
           {
             // The user did something, so reset timer for when to reveal diagnostics
@@ -236,7 +230,6 @@ export class ClangdContext implements vscode.Disposable {
 
             if (this.userDiagnosticsDelayAfterEdit > 0.0)
             {
-              console.log("Resetting timer after changes.");
               this.postEditDelayer.trigger(() => { this.revealDiagnostics(); }); // restart timer
             }
             else // this.diagnosticsWaitForLineChange
@@ -249,7 +242,6 @@ export class ClangdContext implements vscode.Disposable {
                 {
                   if (event.document.lineCount != this.curLineCount) // at least one line of content was added or removed, which counts as a line change
                   {
-                    console.log("Found new line count in changes.");
                     this.diagnosticsCache.clear(); // prevent outdated diags from appearing after this edit; instead we'll show the next diags as soon as they arrive
                     this.noDelayOnNextDiag = true;
                     this.curLineCount = event.document.lineCount;
@@ -315,7 +307,6 @@ export class ClangdContext implements vscode.Disposable {
   // Send to VSC the last diagnostics received from clangd
   revealDiagnostics()
   {
-    console.log("Showing saved diagnostics.");
     for (const [key, diagnostics] of this.diagnosticsCache)
     {
         const uri = vscode.Uri.parse(key);
@@ -329,11 +320,9 @@ export class ClangdContext implements vscode.Disposable {
   // React to a change in the position of the text cursor
   cursorMoved(newLine : number)
   {
-    console.log("Text cursor moved.");
     // If lastLineCursor is 0, this probably means we just opened the project, so don't take action this first time that the line is set
     if (this.diagnosticsWaitForLineChange && newLine !== this.lastLineCursor && this.lastLineCursor != 0)
     {
-      console.log("Showing diags due to cursor line change.");
       // Show existing diagnostics, but also set noDelayOnNextDiag to true because if the user just pasted something in,
       // it's the next diags which will contain the response to the pasted text
       this.revealDiagnostics();
@@ -347,7 +336,6 @@ export class ClangdContext implements vscode.Disposable {
   updateDelay()
   {
     this.userDiagnosticsDelayAfterEdit = config.get<number>('diagnosticsDelay.afterTyping') ?? this.defaultDiagnosticsDelayAfterEdit;
-    console.log(`Delay updated to ${this.userDiagnosticsDelayAfterEdit}.`);
     this.postEditDelayer = new vscodelcAsync.Delayer<void>(this.userDiagnosticsDelayAfterEdit * 1000);
   }
 }
