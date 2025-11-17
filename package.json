@@ -180,6 +180,21 @@
                     "default": 0.55,
                     "description": "Opacity of inactive regions (used only if clangd.inactiveRegions.useBackgroundHighlight=false)"
                 },
+                "clangd.diagnosticsDelay.afterTyping": {
+                    "type": "number",
+                    "default": 0.75,
+                    "description": "Number of seconds to wait after user has finished typing before showing diagnostics from clangd."
+                },
+                "clangd.diagnosticsDelay.untilLineChange": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Wait for user to move to a new line before showing diagnostics from clangd."
+                },
+                "clangd.diagnosticsDelay.untilFileSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Wait for user to save the current file before showing diagnostics from clangd."
+                },
                 "clangd.enableCodeCompletion": {
                     "type": "boolean",
                     "default": true,
