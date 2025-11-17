@@ -116,6 +116,23 @@ export async function activate(context: vscode.ExtensionContext):
     }, 5000);
   }
 
+  context.subscriptions.push(
+    // Register for changes in the position of the text cursor in case user asks for "Until Line Change" diagnostics delay
+    vscode.window.onDidChangeTextEditorSelection(event =>
+    {
+      if (clangdContext)
+        clangdContext.cursorMoved(event.selections[0].active.line);
+    }),
+    // Watch for config changes so user can change the diagnostics delay setting at will
+    vscode.workspace.onDidChangeConfiguration((conf) =>
+    {
+      if (conf.affectsConfiguration('clangd.diagnosticsDelay.afterTyping') && clangdContext)
+        clangdContext.updateDelay();
+      else if (conf.affectsConfiguration('clangd.diagnosticsDelay.untilLineChange') && clangdContext)
+        clangdContext.diagnosticsWaitForLineChange = vscode.workspace.getConfiguration('clangd').get<boolean>('diagnosticsDelay.untilLineChange') ?? false;
+      })
+  );
+
   apiInstance = new ClangdExtensionImpl(clangdContext?.client);
   return apiInstance;
 }
