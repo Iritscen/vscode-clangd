@@ -1,6 +1,7 @@
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import * as vscodelc from 'vscode-languageclient/node';
+import * as vscodelcAsync from 'vscode-languageclient/lib/common/utils/async';
 
 import {ClangdContext} from '../src/clangd-context';
 import * as config from '../src/config';
@@ -14,6 +15,17 @@ class MockClangdContext implements ClangdContext {
 
   visibleClangdEditors: vscode.TextEditor[] = [];
 
+  diagnosticsHandle : any;
+  diagnosticsCache : Map<string, vscode.Diagnostic[]> = new Map();
+  defaultDiagnosticsDelayAfterEdit = 0;
+  userDiagnosticsDelayAfterEdit = this.defaultDiagnosticsDelayAfterEdit;
+  postEditDelayer : any;
+  lastLineCursor = 0;
+  diagnosticsWaitForLineChange = false;
+  noDelayOnNextDiag = false;
+  curLineCount = 0;
+  diagnosticsWaitForFileSave = false;
+
   async activate() { throw new Error('Method not implemented.'); }
 
   async startClient() { throw new Error('Method not implemented.'); }
@@ -23,6 +35,14 @@ class MockClangdContext implements ClangdContext {
   clientIsRunning() { return true; }
 
   dispose() { throw new Error('Method not implemented.'); }
+
+  async overrideDiagnostics() { throw new Error('Method not implemented.'); }
+
+  revealDiagnostics() { throw new Error('Method not implemented.'); }
+
+  cursorMoved(newLine: number) { throw new Error('Method not implemented.'); }
+
+  async updateDelay() { throw new Error('Method not implemented.'); }
 }
 
 suite('InactiveRegionsFeature', () => {
